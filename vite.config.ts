@@ -13,21 +13,31 @@ export default defineConfig(({mode}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        workbox: {
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+        },
         manifest: {
           name: 'CohortMind',
           short_name: 'CohortMind',
           description: 'Psychometrically grounded learner profiling for faculty.',
           theme_color: '#4f46e5',
+          background_color: '#ffffff',
+          display: 'standalone',
+          orientation: 'portrait',
           icons: [
             {
               src: 'https://picsum.photos/seed/cohortmind/192/192',
               sizes: '192x192',
-              type: 'image/png'
+              type: 'image/png',
+              purpose: 'any maskable'
             },
             {
               src: 'https://picsum.photos/seed/cohortmind/512/512',
               sizes: '512x512',
-              type: 'image/png'
+              type: 'image/png',
+              purpose: 'any maskable'
             }
           ]
         }
