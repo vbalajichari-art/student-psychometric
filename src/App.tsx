@@ -19,6 +19,7 @@ import {
   Download, 
   Upload,
   Scan,
+  Copy,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -117,6 +118,8 @@ export default function App() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [showResponseQR, setShowResponseQR] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const [isBulkScan, setIsBulkScan] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Persistence
   useEffect(() => {
@@ -210,12 +213,17 @@ export default function App() {
                 : c
             ));
             setScanResult("Response added successfully!");
-            if (scannerRef.current) scannerRef.current.clear();
-            setTimeout(() => {
-              setView('cohort_detail');
-              setScanResult(null);
-              scannerRef.current = null;
-            }, 1500);
+            
+            if (!isBulkScan) {
+              if (scannerRef.current) scannerRef.current.clear();
+              setTimeout(() => {
+                setView('cohort_detail');
+                setScanResult(null);
+                scannerRef.current = null;
+              }, 1500);
+            } else {
+              setTimeout(() => setScanResult(null), 1000);
+            }
           }
         } catch (e) {
           console.error("Invalid QR data", e);
@@ -240,6 +248,74 @@ export default function App() {
     a.href = url;
     a.download = `cohortmind_export_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
+  };
+
+  const importJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const imported = JSON.parse(event.target?.result as string);
+        // Support both full export and single response
+        if (Array.isArray(imported)) {
+          if (confirm("This will replace all current cohorts. Continue?")) {
+            setCohorts(imported);
+            alert("Full backup restored successfully!");
+          }
+        } else if (imported.type === 'cohortmind_response') {
+          if (activeCohortId) {
+            const response: Response = {
+              id: crypto.randomUUID(),
+              surveyId: imported.surveyId,
+              timestamp: Date.now(),
+              answers: imported.answers
+            };
+            setCohorts(prev => prev.map(c => 
+              c.id === activeCohortId 
+                ? { ...c, responses: [...c.responses, response] }
+                : c
+            ));
+            alert("Response added to current cohort!");
+          } else {
+            alert("To import a single response, please open a specific cohort first.");
+          }
+        } else {
+          alert("Unrecognized JSON format.");
+        }
+      } catch (err) {
+        alert("Invalid JSON file.");
+      }
+      // Reset input
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  };
+
+  const pasteResponses = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const data = JSON.parse(text);
+      if (data.type === 'cohortmind_response' && activeCohortId) {
+        const response: Response = {
+          id: crypto.randomUUID(),
+          surveyId: data.surveyId,
+          timestamp: Date.now(),
+          answers: data.answers
+        };
+        setCohorts(prev => prev.map(c => 
+          c.id === activeCohortId 
+            ? { ...c, responses: [...c.responses, response] }
+            : c
+        ));
+        alert("Response pasted successfully!");
+      } else {
+        alert("Clipboard does not contain a valid response code.");
+      }
+    } catch (err) {
+      alert("Failed to read clipboard or invalid data.");
+    }
   };
 
   return (
@@ -381,8 +457,15 @@ export default function App() {
               )}
 
               <div className="flex gap-2">
-                <Button variant="ghost" className="flex-1" icon={Download} onClick={exportData}>Export JSON</Button>
-                <Button variant="ghost" className="flex-1" icon={Upload} onClick={() => alert("Import feature coming soon.")}>Import JSON</Button>
+                <Button variant="ghost" className="flex-1" icon={Download} onClick={exportData}>Backup All</Button>
+                <Button variant="ghost" className="flex-1" icon={Upload} onClick={() => fileInputRef.current?.click()}>Restore Backup</Button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept=".json" 
+                  onChange={importJson} 
+                />
               </div>
             </motion.div>
           )}
@@ -548,7 +631,13 @@ export default function App() {
                     ))}
                   </div>
 
-                  <Button className="w-full" icon={Scan} onClick={() => setView('scan')}>Scan More Responses</Button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <Button className="flex-1" icon={Scan} onClick={() => setView('scan')}>Scan QR</Button>
+                      <Button variant="outline" className="flex-1" icon={Copy} onClick={pasteResponses}>Paste Code</Button>
+                    </div>
+                    <Button variant="ghost" className="w-full" icon={Upload} onClick={() => fileInputRef.current?.click()}>Import Response File</Button>
+                  </div>
                 </div>
               )}
             </motion.div>
@@ -562,11 +651,28 @@ export default function App() {
               animate={{ opacity: 1 }}
               className="space-y-6"
             >
-              <div className="flex items-center gap-3">
-                <Button variant="ghost" className="p-2" onClick={() => setView('cohort_detail')}>
-                  <ArrowLeft size={20} />
-                </Button>
-                <h2 className="text-xl font-bold">Scan Response</h2>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" className="p-2" onClick={() => setView('cohort_detail')}>
+                    <ArrowLeft size={20} />
+                  </Button>
+                  <h2 className="text-xl font-bold">Scan Response</h2>
+                </div>
+                <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full">
+                  <span className="text-[10px] font-bold uppercase text-slate-500">Bulk Mode</span>
+                  <button 
+                    onClick={() => setIsBulkScan(!isBulkScan)}
+                    className={clsx(
+                      "w-8 h-4 rounded-full transition-colors relative",
+                      isBulkScan ? "bg-indigo-600" : "bg-slate-300"
+                    )}
+                  >
+                    <div className={clsx(
+                      "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all",
+                      isBulkScan ? "left-4.5" : "left-0.5"
+                    )} />
+                  </button>
+                </div>
               </div>
 
               <div className="bg-black rounded-2xl overflow-hidden aspect-square relative border-4 border-indigo-600">
@@ -575,15 +681,21 @@ export default function App() {
                   <div className="absolute inset-0 bg-emerald-600/90 flex flex-col items-center justify-center text-white p-6 text-center animate-in fade-in zoom-in">
                     <CheckCircle2 size={64} className="mb-4" />
                     <h3 className="text-2xl font-bold">{scanResult}</h3>
+                    {isBulkScan && <p className="text-sm mt-2">Ready for next scan...</p>}
                   </div>
                 )}
               </div>
 
-              <div className="bg-indigo-50 p-4 rounded-xl flex gap-3 items-start border border-indigo-100">
-                <Info className="text-indigo-600 shrink-0" size={20} />
-                <p className="text-sm text-indigo-800">
-                  Position the student's response QR code within the frame. Data is processed locally and anonymously.
-                </p>
+              <div className="space-y-3">
+                <div className="bg-indigo-50 p-4 rounded-xl flex gap-3 items-start border border-indigo-100">
+                  <Info className="text-indigo-600 shrink-0" size={20} />
+                  <p className="text-sm text-indigo-800">
+                    Position the student's response QR code within the frame. Data is processed locally and anonymously.
+                  </p>
+                </div>
+                {isBulkScan && (
+                  <Button className="w-full" onClick={() => setView('cohort_detail')}>Done Scanning</Button>
+                )}
               </div>
             </motion.div>
           )}
@@ -653,20 +765,48 @@ export default function App() {
                     <p className="text-slate-500">Present this QR code to your instructor to share your anonymous profile.</p>
                   </div>
 
-                  <div className="bg-white p-6 rounded-3xl shadow-xl inline-block border border-slate-100">
-                    <QRCodeSVG 
-                      value={JSON.stringify({
-                        type: 'cohortmind_response',
-                        surveyId: activeSurvey.id,
-                        answers: studentAnswers
-                      })} 
-                      size={240}
-                      level="M"
-                      includeMargin={false}
-                    />
-                  </div>
+                  <div className="space-y-6">
+                    <div className="bg-white p-6 rounded-3xl shadow-xl inline-block border border-slate-100">
+                      <QRCodeSVG 
+                        value={JSON.stringify({
+                          type: 'cohortmind_response',
+                          surveyId: activeSurvey.id,
+                          answers: studentAnswers
+                        })} 
+                        size={240}
+                        level="M"
+                        includeMargin={false}
+                      />
+                    </div>
 
-                  <Button className="w-full" variant="outline" onClick={() => setView('landing')}>Done</Button>
+                    <div className="flex flex-col gap-3 max-w-xs mx-auto">
+                      <Button 
+                        variant="outline" 
+                        icon={Copy}
+                        onClick={() => {
+                          const data = JSON.stringify({
+                            type: 'cohortmind_response',
+                            surveyId: activeSurvey.id,
+                            answers: studentAnswers
+                          });
+                          navigator.clipboard.writeText(data);
+                          alert("Response code copied to clipboard!");
+                        }}
+                      >
+                        Copy Response Code
+                      </Button>
+                      <Button 
+                        className="w-full" 
+                        onClick={() => {
+                          setView('landing');
+                          setStudentAnswers({});
+                          setShowResponseQR(false);
+                        }}
+                      >
+                        Finish
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </motion.div>
