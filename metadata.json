@@ -1,0 +1,5 @@
+{
+  "name": "CohortMind",
+  "description": "Psychometrically grounded pedagogical decision support system for higher education faculty.",
+  "requestFramePermissions": ["camera"]
+}
